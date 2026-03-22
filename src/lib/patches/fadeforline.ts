@@ -1,7 +1,7 @@
-import { useEffect } from "react";
 import { create } from "zustand";
 import createSelectors from "@/lib/utils/createSelectors";
 import { Patches, InkStory } from "@/lib/ink";
+import { useContents } from "@/hooks/story";
 
 declare module "@/lib/ink" {
 	interface InkStory {
@@ -33,19 +33,6 @@ const useContentComplete = create<ContentComplete>((set) => ({
 		set({ last_content });
 	},
 }));
-const setChoicesDelay = (ink: InkStory) => {
-	useEffect(() => {
-		if (ink.options.linedelay == 0) return;
-		const timer = setTimeout(() => {
-			useContentComplete.getState().setContentComplete(true);
-		}, (ink.contents.length - ink.visibleLines) * ink.options.linedelay * 1000);
-
-		return () => {
-			clearTimeout(timer);
-		};
-	}, [ink.contents]);
-	useEffect(() => {}, [ink.choicesCanShow]);
-};
 
 const load = () => {
 	Patches.add(function () {
@@ -65,13 +52,23 @@ const load = () => {
 		});
 		Object.defineProperty(this, "choicesCanShow", {
 			get() {
-				return createSelectors(
-					useContentComplete
-				).use.contentComplete();
+				return createSelectors(useContentComplete).use.contentComplete();
 			},
 		});
-		const setDelay = () => setChoicesDelay(this);
-		this.effects.push(setDelay);
+
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		const unsub = useContents.subscribe(() => {
+			if (this.options.linedelay == 0) return;
+			if (timer) clearTimeout(timer);
+			timer = setTimeout(() => {
+				useContentComplete.getState().setContentComplete(true);
+			}, (this.contents.length - this.visibleLines) * this.options.linedelay * 1000);
+		});
+
+		this.cleanups.push(() => {
+			unsub();
+			if (timer) clearTimeout(timer);
+		});
 		this.clears.push(() => {
 			if (this.options.linedelay != 0)
 				useContentComplete.getState().setContentComplete(false);
