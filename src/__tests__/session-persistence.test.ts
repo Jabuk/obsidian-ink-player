@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import useContents from "../hooks/story/story_contents";
 import useFile from "../hooks/file";
+import useStory from "../hooks/story/story";
 import memory from "../lib/patches/memory";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ beforeEach(() => {
 	localStorage.clear();
 	useContents.setState({ contents: [] });
 	useFile.getState().init("", "", "");
+	useStory.setState({ ink: null });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -105,10 +107,112 @@ describe("1. useContents.subscribe", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. Session SAVE
+// 2. REAL plugin subscription (reads from useStory, not closure)
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("2. Session save (subscription)", () => {
+/** Exact copy of the subscription callback from plugin.ts */
+function makeRealPluginSubscription() {
+	return useContents.subscribe(() => {
+		const ink = useStory.getState().ink;
+		const filePath = useFile.getState().filePath;
+		if (!ink || !filePath) return;
+		try {
+			const save: Record<string, unknown> = {
+				state: (ink as any).story.state.toJson(),
+			};
+			(ink as any).save_label.forEach((label: string) => {
+				if (
+					label in (ink as any) &&
+					typeof (ink as any)[label] !== "undefined"
+				)
+					save[label] = (ink as any)[label];
+			});
+			localStorage.setItem(`ink-session-${filePath}`, JSON.stringify(save));
+		} catch (_) {}
+	});
+}
+
+describe("2. Real plugin subscription (via useStory)", () => {
+	it("saves when useStory.ink AND useFile.filePath are both set", () => {
+		useFile.getState().init(FILE_PATH, "", "");
+		const ink = makeMockInk();
+		useStory.setState({ ink: ink as any });
+
+		const unsub = makeRealPluginSubscription();
+		useContents.getState().add(["line 1"]);
+
+		const raw = localStorage.getItem(SESSION_KEY);
+		expect(raw, "session not saved — ink or filePath was null in subscription").not.toBeNull();
+		expect(JSON.parse(raw!).state).toBe('{"pos":5}');
+
+		unsub();
+	});
+
+	it("does NOT save when useStory.ink is null (guard works)", () => {
+		useFile.getState().init(FILE_PATH, "", "");
+		// ink is null (default)
+
+		const unsub = makeRealPluginSubscription();
+		useContents.getState().add(["line 1"]);
+
+		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+		unsub();
+	});
+
+	it("does NOT save when useFile.filePath is empty (guard works)", () => {
+		const ink = makeMockInk();
+		useStory.setState({ ink: ink as any });
+		// filePath is empty (default after beforeEach)
+
+		const unsub = makeRealPluginSubscription();
+		useContents.getState().add(["line 1"]);
+
+		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+		unsub();
+	});
+
+	it("saves save_label fields (e.g. contents) when ink is set", () => {
+		useFile.getState().init(FILE_PATH, "", "");
+		const ink = makeMockInk('{"pos":1}', ["myField"]);
+		(ink as any).myField = "hello";
+		useStory.setState({ ink: ink as any });
+
+		const unsub = makeRealPluginSubscription();
+		useContents.getState().add(["line"]);
+
+		const raw = JSON.parse(localStorage.getItem(SESSION_KEY)!);
+		expect(raw.myField).toBe("hello");
+
+		unsub();
+	});
+
+	it("saves ink.contents (the default save_label) via getter", () => {
+		useFile.getState().init(FILE_PATH, "", "");
+		// ink.save_label includes "contents" by default
+		// ink.contents getter returns useContents.getState().contents
+		const ink = makeMockInk('{"pos":1}', ["contents"]);
+		// Override contents getter to return current Zustand state
+		Object.defineProperty(ink, "contents", {
+			get: () => useContents.getState().contents,
+			configurable: true,
+		});
+		useStory.setState({ ink: ink as any });
+
+		const unsub = makeRealPluginSubscription();
+		useContents.getState().add(["saved line"]);
+
+		const raw = JSON.parse(localStorage.getItem(SESSION_KEY)!);
+		expect(raw.contents).toEqual(["saved line"]);
+
+		unsub();
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. Session SAVE (helper-based)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("3. Session save (subscription)", () => {
 	it("saves to localStorage when contents change and filePath is set", () => {
 		useFile.getState().init(FILE_PATH, "", "");
 		const ink = makeMockInk();
@@ -348,7 +452,83 @@ describe("5. Race condition: double ink creation wipes session", () => {
 // 6. Full round-trip: save → restore
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("6. Full round-trip", () => {
+describe("6. Full simulation: play → save → reload → restore", () => {
+	it("session saved during play is fully restorable after Zustand state reset", () => {
+		// ── PLAY PHASE ──────────────────────────────────────────────────────
+		useFile.getState().init(FILE_PATH, "", "");
+		const stateJson = '{"chapter":3,"score":42}';
+		const ink = makeMockInk(stateJson, ["contents"]);
+		Object.defineProperty(ink, "contents", {
+			get: () => useContents.getState().contents,
+			set: (v: string[]) => useContents.getState().setContents(v),
+			configurable: true,
+		});
+		useStory.setState({ ink: ink as any });
+
+		const unsub = makeRealPluginSubscription();
+
+		// Simulate game play: intro + choice + more content
+		useContents.getState().add(["Intro text."]);
+		useContents.getState().add(["\x00ink-divider\x00"]); // INK_DIVIDER
+		useContents.getState().add(["Chapter 3 text."]);
+
+		// Verify session was saved
+		const savedRaw = localStorage.getItem(SESSION_KEY);
+		expect(savedRaw, "nothing was saved to localStorage").not.toBeNull();
+		const saved = JSON.parse(savedRaw!);
+		expect(saved.state).toBe(stateJson);
+		expect(saved.contents).toEqual([
+			"Intro text.",
+			"\x00ink-divider\x00",
+			"Chapter 3 text.",
+		]);
+
+		unsub();
+
+		// ── RELOAD SIMULATION ───────────────────────────────────────────────
+		// Reset Zustand state (simulates Obsidian reload — JS memory cleared)
+		useContents.setState({ contents: [] });
+		useStory.setState({ ink: null });
+		useFile.getState().init("", "", "");
+
+		// ── RESTORE PHASE ───────────────────────────────────────────────────
+		// Set restore flag (done by view.setState() or onLayoutReady)
+		localStorage.setItem(RESTORE_FLAG, "true");
+
+		// New ink created after compiledStory()
+		const ink2 = makeMockInk(stateJson, ["contents"]);
+		Object.defineProperty(ink2, "contents", {
+			get: () => useContents.getState().contents,
+			set: (v: string[]) => useContents.getState().setContents(v),
+			configurable: true,
+		});
+
+		// Simulate InkStory.tsx useEffect([ink]) logic
+		const restoreFlag = localStorage.getItem(RESTORE_FLAG);
+		const sessionData = restoreFlag
+			? localStorage.getItem(`ink-session-${ink2.title}`)
+			: null;
+
+		expect(sessionData, "session data not found on restore").not.toBeNull();
+
+		if (sessionData) {
+			// ink2.story.ResetState() — skip in mock
+			// ink2.clear() — skip in mock
+			memory.load(sessionData, ink2 as any);
+			localStorage.removeItem(RESTORE_FLAG);
+		}
+
+		// Verify restore was called correctly
+		expect(ink2.story.state.LoadJson).toHaveBeenCalledWith(stateJson);
+		expect(ink2.clear).toHaveBeenCalled();
+		expect(ink2.continue).toHaveBeenCalled();
+
+		// Verify flag was removed
+		expect(localStorage.getItem(RESTORE_FLAG)).toBeNull();
+	});
+});
+
+describe("7. Full round-trip", () => {
 	it("data saved by subscription is readable by restore logic", () => {
 		useFile.getState().init(FILE_PATH, "", "");
 		const stateJson = '{"chapter":3,"score":42}';
