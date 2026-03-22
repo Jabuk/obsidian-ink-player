@@ -33,6 +33,9 @@ export class InkStoryView extends ItemView {
 		if (filePath && filePath !== useFile.getState().filePath) {
 			const file = this.app.vault.getAbstractFileByPath(filePath);
 			if (file instanceof TFile) {
+				if (localStorage.getItem(`ink-session-${filePath}`)) {
+					localStorage.setItem("ink-player-restore-session", "true");
+				}
 				const { vault } = this.app;
 				const markdown = await vault.read(file);
 				const resourcePath = vault.adapter
@@ -55,17 +58,6 @@ export class InkStoryView extends ItemView {
 	}
 
 	async onClose() {
-		const ink = useStory.getState().ink;
-		if (ink) {
-			try {
-				const save: Record<string, unknown> = { state: ink.story.state.toJson() };
-				ink.save_label.forEach((label) => {
-					if (label in ink && typeof ink[label as keyof typeof ink] !== "undefined")
-						save[label] = ink[label as keyof typeof ink];
-				});
-				localStorage.setItem(`ink-session-${ink.title}`, JSON.stringify(save));
-			} catch (_) {}
-			ink.dispose();
-		}
+		useStory.getState().ink?.dispose();
 	}
 }
