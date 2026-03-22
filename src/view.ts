@@ -38,14 +38,19 @@ export class InkStoryView extends ItemView {
 				}
 				const { vault } = this.app;
 				const markdown = await vault.read(file);
-				const resourcePath = vault.adapter
-					.getResourcePath(filePath)
-					.split("/")
-					.slice(0, -1)
-					.join("/");
-				useFile.getState().init(filePath, markdown, resourcePath);
-				compiledStory();
-				this.leaf.updateHeader();
+				// Guard: onLayoutReady may have fired while we were awaiting
+				// vault.read() and already compiled this story. If so, skip to
+				// avoid a second ink instance that wipes the restore flag.
+				if (useStory.getState().ink?.title !== filePath) {
+					const resourcePath = vault.adapter
+						.getResourcePath(filePath)
+						.split("/")
+						.slice(0, -1)
+						.join("/");
+					useFile.getState().init(filePath, markdown, resourcePath);
+					compiledStory();
+					this.leaf.updateHeader();
+				}
 			}
 		}
 		await super.setState(state, result);
