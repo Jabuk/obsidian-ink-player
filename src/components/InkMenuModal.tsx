@@ -49,6 +49,7 @@ const GameMenuModal: React.FC<GameMenuModalProps> = ({
 								if (!ink) return;
 								if (type === "save") {
 									memory.save(item, ink);
+									close();
 								} else if (save) {
 									memory.load(save.data, ink);
 									close();
