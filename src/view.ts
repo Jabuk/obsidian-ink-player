@@ -49,7 +49,6 @@ export class InkStoryView extends ItemView {
 						.join("/");
 					useFile.getState().init(filePath, markdown, resourcePath);
 					compiledStory();
-					this.leaf.updateHeader();
 				}
 			}
 		}
