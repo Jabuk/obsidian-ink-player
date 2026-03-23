@@ -7,6 +7,7 @@ import {
 	PluginSettingTab,
 	Setting,
 	TAbstractFile,
+	TFile,
 } from "obsidian";
 import { InkStoryView, INK_STORY_VIEW } from "view";
 import { InkStorySettings, DEFAULT_SETTINGS } from "settings";
@@ -129,9 +130,14 @@ export class InkStorylugin extends Plugin {
 		}
 		const fileAdapter = vault.adapter;
 		const filePath = file.path;
+
+		const fileLeaf = workspace.getLeavesOfType("markdown").find(
+			(leaf) => (leaf.view as MarkdownView).file?.path === filePath
+		);
 		const markdown =
-			workspace.getActiveViewOfType(MarkdownView)?.editor.getValue() ||
-			"";
+			(fileLeaf?.view as MarkdownView)?.editor.getValue() ||
+			(file instanceof TFile ? await vault.read(file) : "");
+
 		const resourcePath = fileAdapter
 			.getResourcePath(filePath)
 			.split("/")

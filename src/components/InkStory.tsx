@@ -28,8 +28,6 @@ const InkStoryComponent: React.FC<InkStoryProps> = ({ ink, className }) => {
 		}
 	}, [ink]);
 
-	ink.useEffect();
-
 	return (
 		<div id="ink-story" className={className}>
 			<InkImage image_src={ink.useImage} />
