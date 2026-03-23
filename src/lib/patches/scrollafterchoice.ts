@@ -1,25 +1,25 @@
-import { useEffect, useRef } from "react";
-import { Patches, Choice } from "@/lib/ink";
-const scrollAfterChoice = (choices: Choice[]) => {
-	const lastButtonRef = useRef<HTMLElement | null>(null);
-	useEffect(() => {
-		lastButtonRef.current = document.querySelector(
-			"ul#ink-choices > li:last-child"
-		) as HTMLElement;
+import { useChoices } from "@/hooks/story";
+import { Patches } from "@/lib/ink";
 
-		if (lastButtonRef.current) {
-			const element = document.querySelector("#ink-story") as HTMLElement;
-			element.scrollTo({
-				top: lastButtonRef.current.offsetTop,
-				behavior: "smooth",
-			});
-		}
-	}, [choices]);
-};
 const load = () => {
 	Patches.add(function () {
-		const scroll = () => scrollAfterChoice(this.choices);
-		this.effects.push(scroll);
+		const unsub = useChoices.subscribe(() => {
+			setTimeout(() => {
+				const lastButton = document.querySelector(
+					"ul#ink-choices > li:last-child"
+				) as HTMLElement;
+				if (lastButton) {
+					const element = document.querySelector(
+						"#ink-story"
+					) as HTMLElement;
+					element?.scrollTo({
+						top: lastButton.offsetTop,
+						behavior: "smooth",
+					});
+				}
+			}, 0);
+		});
+		this.cleanups.push(unsub);
 	}, {});
 };
 

@@ -13,9 +13,22 @@ export const compiledStory = () => {
 	const filePath = useFile.getState().filePath;
 	const markdown = useFile.getState().markdown;
 
-	const story = new inkjs.Compiler(markdown, {
-		fileHandler,
-		errorHandler,
-	}).Compile();
-	useStory.getState().setStory(story, filePath);
+	if (!markdown) {
+		useError.getState().errorHandler("Error: No ink content found");
+		return;
+	}
+
+	try {
+		const story = new inkjs.Compiler(markdown, {
+			fileHandler,
+			errorHandler,
+		}).Compile();
+		if (!story) {
+			useError.getState().errorHandler("Error: Compilation returned no story");
+			return;
+		}
+		useStory.getState().setStory(story, filePath);
+	} catch (e) {
+		useError.getState().errorHandler(`Error: ${e instanceof Error ? e.message : String(e)}`);
+	}
 };
